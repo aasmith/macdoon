@@ -1,0 +1,19 @@
+#import "MDHTMLTemplate.h"
+
+NSString *const MDHTMLTemplate =
+    @"<!DOCTYPE html>\n"
+    @"<html>\n"
+    @"<head>\n"
+    @"<meta charset=\"utf-8\">\n"
+    @"<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
+    @"<meta name=\"color-scheme\" content=\"light dark\">\n"
+    @"<style>\n%@\n</style>\n"
+    @"<style>\n"
+    @"  body { max-width: 980px; margin: 0 auto; padding: 45px; }\n"
+    @"  @media (max-width: 767px) { body { padding: 15px; } }\n"
+    @"</style>\n"
+    @"</head>\n"
+    @"<body>\n"
+    @"<article class=\"markdown-body\">\n%@\n</article>\n"
+    @"</body>\n"
+    @"</html>";
