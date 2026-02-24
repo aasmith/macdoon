@@ -9,6 +9,7 @@ NSString *const MDHTMLTemplate =
     @"<meta name=\"color-scheme\" content=\"light dark\">\n"
     @"<style>\n%@\n</style>\n"
     @"<style>\n"
+    @"  html, body { overflow-x: hidden; }\n"
     @"  body { max-width: 980px; margin: 0 auto; padding: 45px; }\n"
     @"  @media (max-width: 767px) { body { padding: 15px; } }\n"
     @"</style>\n"
