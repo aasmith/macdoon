@@ -102,6 +102,10 @@
     NSString *body = [NSString stringWithUTF8String:html_body];
     free(html_body);
 
+    if (baseURL) {
+        body = [self embedLocalImages:body baseURL:baseURL];
+    }
+
     if (_initialLoadDone) {
         // Update innerHTML to avoid white flash and preserve scroll
         NSString *escaped = [self jsonEscapeString:body];
@@ -128,6 +132,43 @@
                                            encoding:NSUTF8StringEncoding];
     // json is ["..."], extract the string value (with quotes)
     return [json substringWithRange:NSMakeRange(1, json.length - 2)];
+}
+
+- (NSString *)embedLocalImages:(NSString *)html baseURL:(NSURL *)baseURL {
+    NSRegularExpression *regex = [NSRegularExpression
+        regularExpressionWithPattern:@"<img\\s+src=\"([^\"]+)\""
+                             options:0 error:nil];
+    NSMutableString *result = [html mutableCopy];
+    NSArray *matches = [regex matchesInString:result options:0
+                                        range:NSMakeRange(0, result.length)];
+    // Replace from end to start to preserve character offsets
+    for (NSTextCheckingResult *match in [matches reverseObjectEnumerator]) {
+        NSRange srcRange = [match rangeAtIndex:1];
+        NSString *src = [result substringWithRange:srcRange];
+
+        // Skip absolute URLs and data URIs
+        if ([src hasPrefix:@"http://"] || [src hasPrefix:@"https://"] ||
+            [src hasPrefix:@"data:"]) continue;
+
+        NSURL *imageURL = [NSURL URLWithString:src relativeToURL:baseURL];
+        if (!imageURL) imageURL = [baseURL URLByAppendingPathComponent:src];
+        NSData *imageData = [NSData dataWithContentsOfURL:imageURL];
+        if (!imageData) continue;
+
+        NSString *ext = [src pathExtension].lowercaseString;
+        NSString *mime = @"image/png";
+        if ([ext isEqualToString:@"jpg"] || [ext isEqualToString:@"jpeg"])
+            mime = @"image/jpeg";
+        else if ([ext isEqualToString:@"gif"])  mime = @"image/gif";
+        else if ([ext isEqualToString:@"svg"])  mime = @"image/svg+xml";
+        else if ([ext isEqualToString:@"webp"]) mime = @"image/webp";
+
+        NSString *base64 = [imageData base64EncodedStringWithOptions:0];
+        NSString *dataURI = [NSString stringWithFormat:@"data:%@;base64,%@",
+                             mime, base64];
+        [result replaceCharactersInRange:srcRange withString:dataURI];
+    }
+    return result;
 }
 
 - (void)reloadContent {

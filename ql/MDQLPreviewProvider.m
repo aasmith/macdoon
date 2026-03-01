@@ -3,323 +3,246 @@
 #import <cmark-gfm.h>
 #import <cmark-gfm-core-extensions.h>
 
-// Forward declarations for AST walking
-static void renderNode(cmark_node *node, NSMutableAttributedString *result,
-                       NSMutableDictionary *attrs, int listIndex);
-
-static NSFont *bodyFont(void) {
-    return [NSFont systemFontOfSize:13 weight:NSFontWeightRegular];
-}
-
-static NSFont *boldFont(void) {
-    return [NSFont systemFontOfSize:13 weight:NSFontWeightBold];
-}
-
-static NSFont *italicFont(void) {
-    return [[NSFontManager sharedFontManager] convertFont:bodyFont()
-                                              toHaveTrait:NSItalicFontMask];
-}
-
-static NSFont *boldItalicFont(void) {
-    return [[NSFontManager sharedFontManager] convertFont:boldFont()
-                                              toHaveTrait:NSItalicFontMask];
-}
-
-static NSFont *monoFont(void) {
-    NSFont *f = [NSFont monospacedSystemFontOfSize:12 weight:NSFontWeightRegular];
-    return f ?: [NSFont fontWithName:@"Menlo" size:12];
-}
-
-static NSFont *headingFont(int level) {
-    CGFloat sizes[] = { 28, 22, 18, 16, 14, 13 };
-    CGFloat size = (level >= 1 && level <= 6) ? sizes[level - 1] : 13;
-    return [NSFont systemFontOfSize:size weight:NSFontWeightBold];
-}
-
-static NSColor *codeBackground(void) {
-    return [NSColor colorWithCalibratedRed:0.94 green:0.95 blue:0.96 alpha:1.0];
-}
-
-static NSColor *linkColor(void) {
-    return [NSColor linkColor];
-}
-
-static NSColor *quoteColor(void) {
-    return [NSColor secondaryLabelColor];
-}
-
-static void appendString(NSMutableAttributedString *result, NSString *str,
-                         NSDictionary *attributes) {
-    NSAttributedString *as = [[NSAttributedString alloc] initWithString:str
-                                                            attributes:attributes];
-    [result appendAttributedString:as];
-}
-
-static void ensureNewline(NSMutableAttributedString *result) {
-    if (result.length > 0) {
-        unichar last = [[result string] characterAtIndex:result.length - 1];
-        if (last != '\n') {
-            appendString(result, @"\n", @{NSFontAttributeName: bodyFont()});
-        }
-    }
-}
-
-static void renderChildren(cmark_node *node, NSMutableAttributedString *result,
-                           NSMutableDictionary *attrs, int listIndex) {
-    cmark_node *child = cmark_node_first_child(node);
-    int idx = listIndex;
-    while (child) {
-        renderNode(child, result, attrs, idx);
-        if (cmark_node_get_type(child) == CMARK_NODE_ITEM) idx++;
-        child = cmark_node_next(child);
-    }
-}
-
-static void renderNode(cmark_node *node, NSMutableAttributedString *result,
-                       NSMutableDictionary *attrs, int listIndex) {
-    cmark_node_type type = cmark_node_get_type(node);
-
-    switch (type) {
-        case CMARK_NODE_DOCUMENT:
-            renderChildren(node, result, attrs, 0);
-            break;
-
-        case CMARK_NODE_PARAGRAPH:
-            renderChildren(node, result, attrs, 0);
-            appendString(result, @"\n\n", @{NSFontAttributeName: bodyFont()});
-            break;
-
-        case CMARK_NODE_HEADING: {
-            int level = cmark_node_get_heading_level(node);
-            NSFont *prevFont = attrs[NSFontAttributeName];
-            attrs[NSFontAttributeName] = headingFont(level);
-            renderChildren(node, result, attrs, 0);
-            appendString(result, @"\n\n", @{NSFontAttributeName: bodyFont()});
-            if (prevFont) attrs[NSFontAttributeName] = prevFont;
-            else [attrs removeObjectForKey:NSFontAttributeName];
-            break;
-        }
-
-        case CMARK_NODE_TEXT: {
-            const char *literal = cmark_node_get_literal(node);
-            if (literal) {
-                NSMutableDictionary *a = [attrs mutableCopy];
-                if (!a[NSFontAttributeName]) a[NSFontAttributeName] = bodyFont();
-                appendString(result, [NSString stringWithUTF8String:literal], a);
-            }
-            break;
-        }
-
-        case CMARK_NODE_SOFTBREAK:
-            appendString(result, @" ", @{NSFontAttributeName: bodyFont()});
-            break;
-
-        case CMARK_NODE_LINEBREAK:
-            appendString(result, @"\n", @{NSFontAttributeName: bodyFont()});
-            break;
-
-        case CMARK_NODE_CODE: {
-            const char *literal = cmark_node_get_literal(node);
-            if (literal) {
-                NSMutableDictionary *a = [attrs mutableCopy];
-                a[NSFontAttributeName] = monoFont();
-                a[NSBackgroundColorAttributeName] = codeBackground();
-                appendString(result, [NSString stringWithUTF8String:literal], a);
-            }
-            break;
-        }
-
-        case CMARK_NODE_CODE_BLOCK: {
-            const char *literal = cmark_node_get_literal(node);
-            if (literal) {
-                NSMutableDictionary *a = [NSMutableDictionary dictionary];
-                a[NSFontAttributeName] = monoFont();
-                a[NSBackgroundColorAttributeName] = codeBackground();
-                NSMutableParagraphStyle *style = [[NSMutableParagraphStyle alloc] init];
-                style.headIndent = 16;
-                style.firstLineHeadIndent = 16;
-                style.tailIndent = -16;
-                a[NSParagraphStyleAttributeName] = style;
-                appendString(result, [NSString stringWithUTF8String:literal], a);
-                ensureNewline(result);
-                appendString(result, @"\n", @{NSFontAttributeName: bodyFont()});
-            }
-            break;
-        }
-
-        case CMARK_NODE_EMPH: {
-            NSFont *prevFont = attrs[NSFontAttributeName];
-            BOOL wasBold = prevFont && ([prevFont.fontDescriptor symbolicTraits] & NSFontBoldTrait);
-            attrs[NSFontAttributeName] = wasBold ? boldItalicFont() : italicFont();
-            renderChildren(node, result, attrs, 0);
-            if (prevFont) attrs[NSFontAttributeName] = prevFont;
-            else [attrs removeObjectForKey:NSFontAttributeName];
-            break;
-        }
-
-        case CMARK_NODE_STRONG: {
-            NSFont *prevFont = attrs[NSFontAttributeName];
-            BOOL wasItalic = prevFont && ([prevFont.fontDescriptor symbolicTraits] & NSFontItalicTrait);
-            attrs[NSFontAttributeName] = wasItalic ? boldItalicFont() : boldFont();
-            renderChildren(node, result, attrs, 0);
-            if (prevFont) attrs[NSFontAttributeName] = prevFont;
-            else [attrs removeObjectForKey:NSFontAttributeName];
-            break;
-        }
-
-        case CMARK_NODE_LINK: {
-            const char *url = cmark_node_get_url(node);
-            NSColor *prevColor = attrs[NSForegroundColorAttributeName];
-            if (url) {
-                attrs[NSLinkAttributeName] = [NSString stringWithUTF8String:url];
-                attrs[NSForegroundColorAttributeName] = linkColor();
-            }
-            renderChildren(node, result, attrs, 0);
-            [attrs removeObjectForKey:NSLinkAttributeName];
-            if (prevColor) attrs[NSForegroundColorAttributeName] = prevColor;
-            else [attrs removeObjectForKey:NSForegroundColorAttributeName];
-            break;
-        }
-
-        case CMARK_NODE_IMAGE: {
-            // Just show alt text
-            const char *alt = cmark_node_get_title(node);
-            if (!alt) alt = cmark_node_get_url(node);
-            if (alt) {
-                NSMutableDictionary *a = [attrs mutableCopy];
-                if (!a[NSFontAttributeName]) a[NSFontAttributeName] = bodyFont();
-                a[NSForegroundColorAttributeName] = [NSColor secondaryLabelColor];
-                appendString(result, [NSString stringWithFormat:@"[image: %s]",alt], a);
-            }
-            break;
-        }
-
-        case CMARK_NODE_BLOCK_QUOTE: {
-            NSColor *prevColor = attrs[NSForegroundColorAttributeName];
-            attrs[NSForegroundColorAttributeName] = quoteColor();
-            NSMutableParagraphStyle *style = [[NSMutableParagraphStyle alloc] init];
-            style.headIndent = 20;
-            style.firstLineHeadIndent = 20;
-            attrs[NSParagraphStyleAttributeName] = style;
-            renderChildren(node, result, attrs, 0);
-            [attrs removeObjectForKey:NSParagraphStyleAttributeName];
-            if (prevColor) attrs[NSForegroundColorAttributeName] = prevColor;
-            else [attrs removeObjectForKey:NSForegroundColorAttributeName];
-            break;
-        }
-
-        case CMARK_NODE_LIST: {
-            int start = cmark_node_get_list_start(node);
-            renderChildren(node, result, attrs, start);
-            break;
-        }
-
-        case CMARK_NODE_ITEM: {
-            cmark_node *parent = cmark_node_parent(node);
-            cmark_list_type lt = cmark_node_get_list_type(parent);
-            NSString *bullet;
-            if (lt == CMARK_ORDERED_LIST) {
-                bullet = [NSString stringWithFormat:@"  %d. ", listIndex];
-            } else {
-                bullet = @"  \u2022 ";
-            }
-            appendString(result, bullet, @{NSFontAttributeName: bodyFont()});
-            renderChildren(node, result, attrs, 0);
-            break;
-        }
-
-        case CMARK_NODE_THEMATIC_BREAK: {
-            appendString(result, @"\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n",
-                @{NSFontAttributeName: bodyFont(),
-                  NSForegroundColorAttributeName: [NSColor separatorColor]});
-            break;
-        }
-
-        case CMARK_NODE_HTML_BLOCK:
-        case CMARK_NODE_HTML_INLINE: {
-            // Render raw HTML as-is (fallback)
-            const char *literal = cmark_node_get_literal(node);
-            if (literal) {
-                NSMutableDictionary *a = [attrs mutableCopy];
-                if (!a[NSFontAttributeName]) a[NSFontAttributeName] = bodyFont();
-                appendString(result, [NSString stringWithUTF8String:literal], a);
-            }
-            break;
-        }
-
-        default:
-            // For any extension nodes (tables, strikethrough, tasklist), fall through
-            renderChildren(node, result, attrs, 0);
-            break;
-    }
-}
+// Simplified HTML template for NSAttributedString (which has limited CSS support).
+// Uses inline-friendly styles instead of the complex GitHub CSS.
+static NSString *const QLHTMLTemplate =
+    @"<!DOCTYPE html>\n"
+    @"<html>\n"
+    @"<head>\n"
+    @"<meta charset=\"utf-8\">\n"
+    @"<style>\n"
+    @"body {\n"
+    @"  font-family: -apple-system, 'Helvetica Neue', Helvetica, Arial, sans-serif;\n"
+    @"  font-size: 15px;\n"
+    @"  line-height: 1.6;\n"
+    @"  color: #1f2328;\n"
+    @"  background-color: #ffffff;\n"
+    @"}\n"
+    @"h1 { font-size: 28px; font-weight: bold; margin-top: 32px; margin-bottom: 16px; }\n"
+    @"h2 { font-size: 22px; font-weight: bold; margin-top: 32px; margin-bottom: 16px; }\n"
+    @"h3 { font-size: 18px; font-weight: bold; margin-top: 24px; margin-bottom: 12px; }\n"
+    @"h4 { font-size: 15px; font-weight: bold; margin-top: 24px; margin-bottom: 12px; }\n"
+    @"p  { margin-top: 0; margin-bottom: 16px; }\n"
+    @"ul, ol { margin-top: 0; margin-bottom: 16px; }\n"
+    @"li { margin-bottom: 4px; }\n"
+    @"blockquote { color: #656d76; margin-left: 0; margin-right: 0; margin-bottom: 16px; padding-left: 16px; }\n"
+    @"pre { font-family: Menlo, Consolas, monospace; font-size: 13px;\n"
+    @"       background-color: #f6f8fa; padding: 16px; margin-top: 0; margin-bottom: 24px; }\n"
+    @"code { font-family: Menlo, Consolas, monospace; font-size: 13px;\n"
+    @"        background-color: #eff1f3; }\n"
+    @"pre code { background-color: transparent; }\n"
+    @"table { border-collapse: collapse; margin-bottom: 16px; }\n"
+    @"th, td { border: 1px solid #d1d9e0; padding: 8px 16px; }\n"
+    @"th { background-color: #f6f8fa; font-weight: bold; }\n"
+    @"a { color: #0969da; }\n"
+    @"img { max-width: 600px; }\n"
+    @"del { color: #656d76; }\n"
+    @"</style>\n"
+    @"</head>\n"
+    @"<body>\n%@\n</body>\n"
+    @"</html>";
 
 @implementation MDQLPreviewProvider
 
 - (void)loadView {
-    NSScrollView *scrollView = [[NSScrollView alloc] initWithFrame:NSMakeRect(0, 0, 800, 600)];
-    scrollView.hasVerticalScroller = YES;
-    scrollView.hasHorizontalScroller = NO;
-    scrollView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-
-    NSTextView *textView = [[NSTextView alloc] initWithFrame:scrollView.bounds];
-    textView.editable = NO;
-    textView.selectable = YES;
-    textView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-    textView.textContainerInset = NSMakeSize(20, 20);
-    textView.textContainer.widthTracksTextView = YES;
-    textView.drawsBackground = YES;
-
-    scrollView.documentView = textView;
-    self.view = scrollView;
+    self.view = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 800, 600)];
 }
 
 - (void)preparePreviewOfFileAtURL:(NSURL *)url
                 completionHandler:(void (^)(NSError * _Nullable))handler {
+
+    BOOL accessGranted = [url startAccessingSecurityScopedResource];
 
     NSError *error = nil;
     NSString *markdown = [NSString stringWithContentsOfURL:url
                                                   encoding:NSUTF8StringEncoding
                                                      error:&error];
     if (!markdown) {
+        if (accessGranted) [url stopAccessingSecurityScopedResource];
         handler(error);
         return;
     }
 
-    // Parse with cmark-gfm
-    static int registered = 0;
-    if (!registered) {
-        cmark_gfm_core_extensions_ensure_registered();
-        registered = 1;
-    }
-
-    int options = CMARK_OPT_SMART;
-    cmark_parser *parser = cmark_parser_new(options);
-
-    const char *extNames[] = {"table", "autolink", "strikethrough", "tagfilter", "tasklist"};
-    for (int i = 0; i < 5; i++) {
-        cmark_syntax_extension *ext = cmark_find_syntax_extension(extNames[i]);
-        if (ext) cmark_parser_attach_syntax_extension(parser, ext);
-    }
-
+    // Render markdown to HTML
     const char *utf8 = [markdown UTF8String];
-    cmark_parser_feed(parser, utf8, strlen(utf8));
-    cmark_node *doc = cmark_parser_finish(parser);
+    char *html_body = md_render_to_html(utf8, strlen(utf8));
+    NSString *body = [NSString stringWithUTF8String:html_body];
+    free(html_body);
 
-    // Walk AST → NSAttributedString
-    NSMutableAttributedString *attrStr = [[NSMutableAttributedString alloc] init];
-    NSMutableDictionary *attrs = [NSMutableDictionary dictionary];
-    renderNode(doc, attrStr, attrs, 0);
+    // NSAttributedString has limited CSS support, so fix up the HTML directly:
+    // 1. Add spacing after code blocks (ignores margin on <pre>)
+    body = [body stringByReplacingOccurrencesOfString:@"</pre>"
+                                           withString:@"</pre><p>&nbsp;</p>"];
+    // 2. Replace heading underlines and <hr> with markers (rendered as
+    //    NSTextAttachment line images after HTML parsing)
+    body = [body stringByReplacingOccurrencesOfString:@"</h1>"
+                                           withString:@"</h1>MDRULE_MARKER\n"];
+    body = [body stringByReplacingOccurrencesOfString:@"</h2>"
+                                           withString:@"</h2>MDRULE_MARKER\n"];
+    body = [body stringByReplacingOccurrencesOfString:@"<hr />"
+                                           withString:@"MDRULE_MARKER\n"];
 
-    cmark_parser_free(parser);
-    cmark_node_free(doc);
+    // Extract local images and replace <img> tags with markers
+    NSURL *baseURL = [url URLByDeletingLastPathComponent];
+    NSMutableArray<NSImage *> *collectedImages = [NSMutableArray new];
+    body = [self extractImages:body baseURL:baseURL into:collectedImages];
 
-    // Display
-    NSScrollView *scrollView = (NSScrollView *)self.view;
-    NSTextView *textView = scrollView.documentView;
-    [[textView textStorage] setAttributedString:attrStr];
+    if (accessGranted) [url stopAccessingSecurityScopedResource];
 
-    handler(nil);
+    // Build HTML with QL-specific simplified styles
+    NSString *fullHTML = [NSString stringWithFormat:QLHTMLTemplate, body];
+
+    // Parse HTML into NSAttributedString
+    NSData *htmlData = [fullHTML dataUsingEncoding:NSUTF8StringEncoding];
+    NSDictionary *opts = @{
+        NSDocumentTypeDocumentAttribute: NSHTMLTextDocumentType,
+        NSCharacterEncodingDocumentAttribute: @(NSUTF8StringEncoding)
+    };
+    NSMutableAttributedString *attrStr = [[NSMutableAttributedString alloc]
+        initWithHTML:htmlData options:opts documentAttributes:nil];
+
+    if (!attrStr) {
+        attrStr = [[NSMutableAttributedString alloc] initWithString:markdown];
+    }
+
+    // Increase line spacing (NSAttributedString ignores CSS line-height)
+    [attrStr enumerateAttribute:NSParagraphStyleAttributeName
+                        inRange:NSMakeRange(0, attrStr.length)
+                        options:0
+                     usingBlock:^(NSParagraphStyle *style, NSRange range, BOOL *stop) {
+        NSMutableParagraphStyle *newStyle = style
+            ? [style mutableCopy]
+            : [[NSMutableParagraphStyle alloc] init];
+        newStyle.lineSpacing = 4.0;
+        newStyle.paragraphSpacing = 8.0;
+        [attrStr addAttribute:NSParagraphStyleAttributeName
+                        value:newStyle
+                        range:range];
+    }];
+
+    // Replace rule markers with a thin line image attachment
+    {
+        NSImage *lineImg = [[NSImage alloc] initWithSize:NSMakeSize(4, 16)];
+        [lineImg lockFocus];
+        [[NSColor colorWithRed:0.82 green:0.84 blue:0.87 alpha:1.0] set];
+        NSRectFill(NSMakeRect(0, 7, 4, 2));
+        [lineImg unlockFocus];
+
+        while (YES) {
+            NSRange r = [attrStr.string rangeOfString:@"MDRULE_MARKER"];
+            if (r.location == NSNotFound) break;
+
+            NSTextAttachment *att = [[NSTextAttachment alloc] init];
+            att.image = lineImg;
+            att.bounds = CGRectMake(0, 0, 10000, 16);
+
+            NSAttributedString *lineStr =
+                [NSAttributedString attributedStringWithAttachment:att];
+            [attrStr replaceCharactersInRange:r withAttributedString:lineStr];
+        }
+    }
+
+    // Replace text markers with NSTextAttachment images
+    for (NSInteger i = (NSInteger)collectedImages.count - 1; i >= 0; i--) {
+        NSString *marker = [NSString stringWithFormat:@"MDIMG_%ld_MARKER", (long)i];
+        NSRange range = [attrStr.string rangeOfString:marker];
+        if (range.location == NSNotFound) continue;
+
+        NSImage *image = collectedImages[i];
+        NSSize size = image.size;
+        CGFloat maxWidth = 600.0;
+        if (size.width > maxWidth) {
+            CGFloat scale = maxWidth / size.width;
+            size = NSMakeSize(size.width * scale, size.height * scale);
+        }
+
+        NSTextAttachment *att = [[NSTextAttachment alloc] init];
+        att.image = image;
+        att.bounds = CGRectMake(0, 0, size.width, size.height);
+
+        NSAttributedString *imgStr =
+            [NSAttributedString attributedStringWithAttachment:att];
+        [attrStr replaceCharactersInRange:range withAttributedString:imgStr];
+    }
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        NSScrollView *scrollView = [[NSScrollView alloc]
+            initWithFrame:self.view.bounds];
+        scrollView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+        scrollView.hasVerticalScroller = YES;
+        scrollView.hasHorizontalScroller = NO;
+        scrollView.drawsBackground = YES;
+        scrollView.backgroundColor = [NSColor whiteColor];
+
+        NSTextView *textView = [[NSTextView alloc]
+            initWithFrame:scrollView.contentView.bounds];
+        textView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+        textView.editable = NO;
+        textView.selectable = YES;
+        textView.drawsBackground = YES;
+        textView.backgroundColor = [NSColor whiteColor];
+        textView.textContainerInset = NSMakeSize(48, 28);
+        textView.textContainer.lineFragmentPadding = 0;
+        [textView.textStorage setAttributedString:attrStr];
+
+        scrollView.documentView = textView;
+        [self.view addSubview:scrollView];
+
+        handler(nil);
+    });
+}
+
+#pragma mark - Image Extraction
+
+- (NSString *)extractImages:(NSString *)html
+                    baseURL:(NSURL *)baseURL
+                       into:(NSMutableArray<NSImage *> *)images {
+    if (!baseURL) return html;
+
+    NSRegularExpression *regex = [NSRegularExpression
+        regularExpressionWithPattern:@"<img[^>]+src=\"([^\"]+)\"[^>]*/>"
+                             options:0 error:nil];
+    NSMutableString *result = [html mutableCopy];
+    NSArray *matches = [regex matchesInString:result options:0
+                                        range:NSMakeRange(0, result.length)];
+
+    for (NSTextCheckingResult *match in [matches reverseObjectEnumerator]) {
+        NSRange fullRange = [match rangeAtIndex:0];
+        NSRange srcRange  = [match rangeAtIndex:1];
+        NSString *src = [result substringWithRange:srcRange];
+
+        // Skip remote images
+        if ([src hasPrefix:@"http://"] || [src hasPrefix:@"https://"] ||
+            [src hasPrefix:@"data:"]) {
+            [result replaceCharactersInRange:fullRange withString:@""];
+            continue;
+        }
+
+        NSURL *imageURL = [NSURL URLWithString:src relativeToURL:baseURL];
+        if (!imageURL) imageURL = [baseURL URLByAppendingPathComponent:src];
+        NSData *imageData = [NSData dataWithContentsOfURL:imageURL];
+        NSImage *image = imageData ? [[NSImage alloc] initWithData:imageData] : nil;
+
+        if (image) {
+            [images insertObject:image atIndex:0];
+            [result replaceCharactersInRange:fullRange withString:@"__MDIMG_PLACEHOLDER__"];
+        } else {
+            [result replaceCharactersInRange:fullRange withString:@""];
+        }
+    }
+
+    // Renumber markers in document order
+    NSUInteger idx = 0;
+    while (YES) {
+        NSRange r = [result rangeOfString:@"__MDIMG_PLACEHOLDER__"];
+        if (r.location == NSNotFound) break;
+        NSString *marker = [NSString stringWithFormat:@"MDIMG_%lu_MARKER",
+                            (unsigned long)idx];
+        [result replaceCharactersInRange:r withString:marker];
+        idx++;
+    }
+
+    return result;
 }
 
 @end

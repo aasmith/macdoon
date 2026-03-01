@@ -42,6 +42,10 @@ int main(void) {
 > "The best way to predict the future is to invent it."
 > — Alan Kay
 
+### Image
+
+![Blue rectangle](images/test.png)
+
 ---
 
 *Rendered with cmark-gfm + GitHub CSS*
